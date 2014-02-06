@@ -1,36 +1,8 @@
-/****************************** Module Header ******************************\
-Module Name:  FileContextMenuExt.cpp
-Project:      CppShellExtContextMenuHandler
-Copyright (c) Microsoft Corporation.
-
-The code sample demonstrates creating a Shell context menu handler with C++. 
-
-A context menu handler is a shell extension handler that adds commands to an 
-existing context menu. Context menu handlers are associated with a particular 
-file class and are called any time a context menu is displayed for a member 
-of the class. While you can add items to a file class context menu with the 
-registry, the items will be the same for all members of the class. By 
-implementing and registering such a handler, you can dynamically add items to 
-an object's context menu, customized for the particular object.
-
-The example context menu handler adds the menu item "Display File Name (C++)"
-to the context menu when you right-click a .cpp file in the Windows Explorer. 
-Clicking the menu item brings up a message box that displays the full path 
-of the .cpp file.
-
-This source is subject to the Microsoft Public License.
-See http://www.microsoft.com/opensource/licenses.mspx#Ms-PL.
-All other rights reserved.
-
-THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, 
-EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED 
-WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR PURPOSE.
-\***************************************************************************/
-
 #include "FileContextMenuExt.h"
 #include "resource.h"
 #include <strsafe.h>
-#include <Shlwapi.h>
+#include <cstring>
+
 #pragma comment(lib, "shlwapi.lib")
 
 
@@ -38,6 +10,8 @@ extern HINSTANCE g_hInst;
 extern long g_cDllRef;
 
 #define IDM_DISPLAY             0  // The command's identifier offset
+#define STRSIZE_IN_BYTES(x)  (_countof(x) * sizeof(TCHAR))
+#define StringCopy(x, y) StringCbCopyW(x, STRSIZE_IN_BYTES(x), y);
 
 FileContextMenuExt::FileContextMenuExt(void) : m_cRef(1), 
     m_pszMenuText(L"&Add to C:\\sum.log"),
@@ -47,17 +21,15 @@ FileContextMenuExt::FileContextMenuExt(void) : m_cRef(1),
     m_pwszVerbCanonicalName(L"AddToSumLog"),
     m_pszVerbHelpText("Add to C:\\sum.log"),
     m_pwszVerbHelpText(L"Add to C:\\sum.log"),
+	m_pwszLogFileName(L"C:\\sum.log"),
 	m_nFiles(0)
 {
     InterlockedIncrement(&g_cDllRef);
-	m_fOut.open(m_pszLogFileName, std::ios::app);
-    // Не знаю, как корректно проверить, открылся ли файл
 
     // Load the bitmap for the menu item. 
-    // If you want the menu item bitmap to be transparent, the color depth of 
-    // the bitmap must not be greater than 8bpp.
     m_hMenuBmp = LoadImage(g_hInst, MAKEINTRESOURCE(IDB_OK), 
         IMAGE_BITMAP, 0, 0, LR_DEFAULTSIZE | LR_LOADTRANSPARENT);
+
 }
 
 FileContextMenuExt::~FileContextMenuExt(void)
@@ -67,14 +39,16 @@ FileContextMenuExt::~FileContextMenuExt(void)
         DeleteObject(m_hMenuBmp);
         m_hMenuBmp = NULL;
     }
-	m_fOut.close();
     InterlockedDecrement(&g_cDllRef);
+
 }
 
 
 void FileContextMenuExt::OnVerbDisplayFileName(HWND hWnd)
 {
 	wchar_t szMessage[300];
+	if (m_nFiles == 0) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
+		L"Error: can't create log file");
 	if (m_nFiles == 1) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
 		L"1 file was added to C:\\sum.log");
 	else if (m_nFiles > 1) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
@@ -82,9 +56,6 @@ void FileContextMenuExt::OnVerbDisplayFileName(HWND hWnd)
 
     MessageBox(hWnd, szMessage, L"CppShellExtContextMenuHandler", MB_OK);
 }
-
-// My functions
-
 
 #pragma region IUnknown
 
@@ -137,27 +108,25 @@ IFACEMETHODIMP FileContextMenuExt::Initialize(
     FORMATETC fe = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM stm;
 
-    // The pDataObj pointer contains the objects being acted upon. In this 
-    // example, we get an HDROP handle for enumerating the selected files and 
-    // folders.
+    // The pDataObj pointer contains the objects being acted upon. 
     if (SUCCEEDED(pDataObj->GetData(&fe, &stm)))
     {
 		using namespace std;
         // Get an HDROP handle.
-        HDROP hDrop = static_cast<HDROP>(GlobalLock(stm.hGlobal));
+		HDROP hDrop = static_cast<HDROP>(GlobalLock(stm.hGlobal));
         if (hDrop != NULL)
         {
-            // Determine how many files are involved in this operation. This 
-            // code sample displays the custom context menu item when only 
-            // one file is selected. 
-            
+            // Determine how many files are involved in this operation.
 			m_nFiles = DragQueryFile(hDrop, 0xFFFFFFFF, NULL, 0);
-			wchar_t szSelectedFile[MAX_PATH];
-			for (int i = 0; i < m_nFiles; i++) {
-				DragQueryFile(hDrop, i, szSelectedFile,
-					ARRAYSIZE(szSelectedFile));
-				m_fOut << szSelectedFile << L"\n";
+			UINT n = 0;
+
+			WCHAR wszSelectedFile[MAX_PATH];
+			for (UINT i = 0; i < m_nFiles; i++) {
+				UINT buf_size = DragQueryFile(hDrop, i, wszSelectedFile,
+					ARRAYSIZE(wszSelectedFile));
+			m_fLog.AddItem(wszSelectedFile);
 			}
+
 			if (m_nFiles > 0) hr = S_OK;
 
             GlobalUnlock(stm.hGlobal);
@@ -237,12 +206,6 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
 {
     BOOL fUnicode = FALSE;
 
-    // Determine which structure is being passed in, CMINVOKECOMMANDINFO or 
-    // CMINVOKECOMMANDINFOEX based on the cbSize member of lpcmi. Although 
-    // the lpcmi parameter is declared in Shlobj.h as a CMINVOKECOMMANDINFO 
-    // structure, in practice it often points to a CMINVOKECOMMANDINFOEX 
-    // structure. This struct is an extended version of CMINVOKECOMMANDINFO 
-    // and has additional members that allow Unicode strings to be passed.
     if (pici->cbSize == sizeof(CMINVOKECOMMANDINFOEX))
     {
         if (pici->fMask & CMIC_MASK_UNICODE)
@@ -269,6 +232,7 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // Is the verb supported by this context menu extension?
         if (StrCmpIA(pici->lpVerb, m_pszVerb) == 0)
         {
+			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
@@ -287,6 +251,7 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // Is the verb supported by this context menu extension?
         if (StrCmpIW(((CMINVOKECOMMANDINFOEX*)pici)->lpVerbW, m_pwszVerb) == 0)
         {
+			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
@@ -306,6 +271,7 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // extension?
         if (LOWORD(pici->lpVerb) == IDM_DISPLAY)
         {
+			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
