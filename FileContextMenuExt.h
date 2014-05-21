@@ -1,6 +1,6 @@
 #pragma once
 
-#include "LogFile.h"
+#include "fileinfo.h"
 #include <shlobj.h>     // For IShellExtInit and IContextMenu
 
 
@@ -13,8 +13,11 @@ public:
     IFACEMETHODIMP_(ULONG) Release();
 
     // IShellExtInit
-    IFACEMETHODIMP Initialize(LPCITEMIDLIST pidlFolder, LPDATAOBJECT pDataObj, HKEY hKeyProgID);
-
+	// pidlFolder holds a folder's pointer to an item identifier list (PIDL). This is an absolute PIDL. For property sheet extensions, this value is NULL.
+	// pDataObject holds a pointer to a data object's IDataObject interface. The data object holds one or more file names in CF_HDROP format.
+	// hRegKey holds a registry key for the file object or folder type.
+	IFACEMETHODIMP Initialize(LPCITEMIDLIST pidlFolder, LPDATAOBJECT pDataObj, HKEY hKeyProgID);
+	
     // IContextMenu
     IFACEMETHODIMP QueryContextMenu(HMENU hMenu, UINT indexMenu, UINT idCmdFirst, UINT idCmdLast, UINT uFlags);
     IFACEMETHODIMP InvokeCommand(LPCMINVOKECOMMANDINFO pici);
@@ -30,12 +33,9 @@ private:
     long m_cRef;
 
     // The name of the selected file.
-    //wchar_t m_szSelectedFile[MAX_PATH];
 
     // The method that handles the "display" verb.
     void OnVerbDisplayFileName(HWND hWnd);
-
-	// My functions
 
     PWSTR m_pszMenuText;
     HANDLE m_hMenuBmp;
@@ -45,8 +45,8 @@ private:
     PCWSTR m_pwszVerbCanonicalName;
     PCSTR m_pszVerbHelpText;
     PCWSTR m_pwszVerbHelpText;
-	PCWSTR m_pwszLogFileName;
-
+	LPWSTR m_pwszLogFileName;
+	 
 	UINT m_nFiles;
-	LogFile m_fLog;
+	filemap m_fMap;
 };

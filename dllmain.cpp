@@ -3,12 +3,9 @@
 #include "ClassFactory.h"           // For the class factory
 #include "Reg.h"
 
-// Regsvr32.exe CppShellExtContextMenuHandler.dll
 
-// {F0F0890C-B351-4792-904C-D26875F842EE}
 const CLSID CLSID_FileContextMenuExt =
 { 0xf0f0890c, 0xb351, 0x4792, { 0x90, 0x4c, 0xd2, 0x68, 0x75, 0xf8, 0x42, 0xee } };
-
 
 
 HINSTANCE   g_hInst     = NULL;

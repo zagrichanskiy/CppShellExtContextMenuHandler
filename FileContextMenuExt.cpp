@@ -2,6 +2,7 @@
 #include "resource.h"
 #include <strsafe.h>
 #include <cstring>
+#include <string>
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -14,18 +15,16 @@ extern long g_cDllRef;
 #define StringCopy(x, y) StringCbCopyW(x, STRSIZE_IN_BYTES(x), y);
 
 FileContextMenuExt::FileContextMenuExt(void) : m_cRef(1), 
-    m_pszMenuText(L"&Add to C:\\sum.log"),
+    m_pszMenuText(L"&Create sum.log"),
     m_pszVerb("calculate"),
     m_pwszVerb(L"calculate"),
     m_pszVerbCanonicalName("AddToSumLog"),
     m_pwszVerbCanonicalName(L"AddToSumLog"),
-    m_pszVerbHelpText("Add to C:\\sum.log"),
-    m_pwszVerbHelpText(L"Add to C:\\sum.log"),
-	m_pwszLogFileName(L"C:\\sum.log"),
+    m_pszVerbHelpText("Create sum.log"),
+    m_pwszVerbHelpText(L"Create sum.log"),
 	m_nFiles(0)
 {
     InterlockedIncrement(&g_cDllRef);
-
     // Load the bitmap for the menu item. 
     m_hMenuBmp = LoadImage(g_hInst, MAKEINTRESOURCE(IDB_OK), 
         IMAGE_BITMAP, 0, 0, LR_DEFAULTSIZE | LR_LOADTRANSPARENT);
@@ -40,7 +39,7 @@ FileContextMenuExt::~FileContextMenuExt(void)
         m_hMenuBmp = NULL;
     }
     InterlockedDecrement(&g_cDllRef);
-
+	delete [] m_pwszLogFileName;
 }
 
 
@@ -50,9 +49,9 @@ void FileContextMenuExt::OnVerbDisplayFileName(HWND hWnd)
 	if (m_nFiles == 0) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
 		L"Error: can't create log file");
 	if (m_nFiles == 1) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
-		L"1 file was added to C:\\sum.log");
+		L"1 file was added to sum.log");
 	else if (m_nFiles > 1) StringCchPrintf(szMessage, ARRAYSIZE(szMessage),
-		L"%d files were added to C:\\sum.log", m_nFiles);
+		L"%d files were added to sum.log", m_nFiles);
 
     MessageBox(hWnd, szMessage, L"CppShellExtContextMenuHandler", MB_OK);
 }
@@ -95,6 +94,9 @@ IFACEMETHODIMP_(ULONG) FileContextMenuExt::Release()
 #pragma region IShellExtInit
 
 // Initialize the context menu handler.
+// pidlFolder holds a folder's pointer to an item identifier list (PIDL). This is an absolute PIDL. For property sheet extensions, this value is NULL.
+// pDataObject holds a pointer to a data object's IDataObject interface. The data object holds one or more file names in CF_HDROP format.
+// hRegKey holds a registry key for the file object or folder type.
 IFACEMETHODIMP FileContextMenuExt::Initialize(
     LPCITEMIDLIST pidlFolder, LPDATAOBJECT pDataObj, HKEY hKeyProgID)
 {
@@ -118,16 +120,28 @@ IFACEMETHODIMP FileContextMenuExt::Initialize(
         {
             // Determine how many files are involved in this operation.
 			m_nFiles = DragQueryFile(hDrop, 0xFFFFFFFF, NULL, 0);
-			UINT n = 0;
-
+			// add files to filemap
 			WCHAR wszSelectedFile[MAX_PATH];
 			for (UINT i = 0; i < m_nFiles; i++) {
 				UINT buf_size = DragQueryFile(hDrop, i, wszSelectedFile,
 					ARRAYSIZE(wszSelectedFile));
-			m_fLog.AddItem(wszSelectedFile);
+				// loop break if current object is directory
+				if (GetFileAttributes(wszSelectedFile) & FILE_ATTRIBUTE_DIRECTORY) {
+					m_nFiles = 0;
+					break;
+				}
+				else // else add this object to filemap
+					m_fMap.insert(wszSelectedFile);
 			}
 
-			if (m_nFiles > 0) hr = S_OK;
+			if (m_nFiles > 0) {
+				hr = S_OK;
+				std::wstring temp(wszSelectedFile);
+				temp.resize(temp.rfind(L'\\') + 1);
+				temp += L"sum.log";
+				m_pwszLogFileName = new WCHAR[MAX_PATH];
+				wcscpy(m_pwszLogFileName, temp.c_str());
+			}
 
             GlobalUnlock(stm.hGlobal);
         }
@@ -153,7 +167,6 @@ IFACEMETHODIMP FileContextMenuExt::Initialize(
 //            passes in the HMENU handle in the hmenu parameter. The 
 //            indexMenu parameter is set to the index to be used for the 
 //            first menu item that is to be added.
-//
 IFACEMETHODIMP FileContextMenuExt::QueryContextMenu(
     HMENU hMenu, UINT indexMenu, UINT idCmdFirst, UINT idCmdLast, UINT uFlags)
 {
@@ -201,9 +214,8 @@ IFACEMETHODIMP FileContextMenuExt::QueryContextMenu(
 //   PURPOSE: This method is called when a user clicks a menu item to tell 
 //            the handler to run the associated command. The lpcmi parameter 
 //            points to a structure that contains the needed information.
-//
 IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
-{
+{	
     BOOL fUnicode = FALSE;
 
     if (pici->cbSize == sizeof(CMINVOKECOMMANDINFOEX))
@@ -232,7 +244,8 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // Is the verb supported by this context menu extension?
         if (StrCmpIA(pici->lpVerb, m_pszVerb) == 0)
         {
-			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			//if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			if (!m_fMap.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
@@ -251,7 +264,8 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // Is the verb supported by this context menu extension?
         if (StrCmpIW(((CMINVOKECOMMANDINFOEX*)pici)->lpVerbW, m_pwszVerb) == 0)
         {
-			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			//if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			if (!m_fMap.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
@@ -271,7 +285,8 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
         // extension?
         if (LOWORD(pici->lpVerb) == IDM_DISPLAY)
         {
-			if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			//if (m_fLog.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
+			if (!m_fMap.WriteLog(m_pwszLogFileName)) m_nFiles = 0;
             OnVerbDisplayFileName(pici->hwnd);
         }
         else
@@ -302,7 +317,7 @@ IFACEMETHODIMP FileContextMenuExt::InvokeCommand(LPCMINVOKECOMMANDINFO pici)
 //
 IFACEMETHODIMP FileContextMenuExt::GetCommandString(UINT_PTR idCommand, 
     UINT uFlags, UINT *pwReserved, LPSTR pszName, UINT cchMax)
-{
+{	// возвращает текст, который будет отображаться на панели статуса
     HRESULT hr = E_INVALIDARG;
 
     if (idCommand == IDM_DISPLAY)
